@@ -8,23 +8,24 @@
   let edits = {};
   let nodes = [];
   let active;
-  let marker;
-  let frameDocument;
+  let sourceDocument;
   let loading = false;
-  let pendingFrame;
   let textNodes = new WeakMap();
   let nodeIndexes = new WeakMap();
   let snapshotFingerprint;
   let selectionRequest = 0;
-  let editorStyle;
   const snapshots = new Map();
+  const sessionDrafts = new Map();
+  let dirty = false;
   window.receiveUuHomepage = (id, html) => snapshots.set(id, html);
 
-  function readSnapshot(id) {
+  async function readSnapshot(id) {
     if (snapshots.has(id)) return Promise.resolve(snapshots.get(id));
     const embedded = el('uu-snapshot-' + id);
     if (embedded) {
-      const html = JSON.parse(embedded.textContent);
+      const bytes = Uint8Array.from(atob(embedded.textContent), character => character.charCodeAt(0));
+      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+      const html = await new Response(stream).text();
       snapshots.set(id, html);
       return Promise.resolve(html);
     }
@@ -52,36 +53,44 @@
     return textNodes.get(node);
   }
 
-  function description(node, index) {
+  function description(node) {
     const label = editableText(node).map(child => child.textContent.trim()).join(' ')
       || node.getAttribute('alt') || node.getAttribute('placeholder') || node.id;
-    return index + ' · ' + node.localName + (label ? ' · ' + label.slice(0, 70) : '');
+    return node.localName + (label ? ' · ' + label.slice(0, 70) : '');
   }
+
+  let page = 0;
+  const pageSize = 30;
 
   function rebuildList() {
     const query = el('homeFind').value.toLowerCase().trim();
-    const options = [];
-    const limit = 80;
-    const selectedIndex = nodeIndexes.get(active);
-    let matches = 0;
-    for (let index = 0; index < nodes.length; index++) {
-      const node = nodes[index];
-      const label = description(node, index);
-      const match = !query || (label + ' ' + node.id).toLowerCase().includes(query);
-      if (match) matches++;
-      if ((match && matches <= limit) || index === selectedIndex) {
-        const option = put('option', label);
-        option.value = String(index);
-        options.push(option);
-      }
-    }
+    const matching = nodes.filter(node => query
+      ? (description(node) + ' ' + node.id).toLowerCase().includes(query)
+      : /^(h[1-6]|p|a|button|img|input|select|textarea|title|meta)$/.test(node.localName));
+    const view = matching.slice(page * pageSize, (page + 1) * pageSize);
+    const list = el('homeList');
+    list.replaceChildren(...view.map(node => {
+      const item = button(description(node), 'btn home-item', () => selectNode(node));
+      item.setAttribute('aria-pressed', String(node === active));
+      return item;
+    }));
+    if (!view.length) list.append(put('p', loading ? 'Открываю страницу…' : 'Элементы не найдены.'));
+    const options = view.includes(active) || !active ? view : [...view, active];
     const placeholder = put('option', 'Выбери элемент');
     placeholder.value = '';
-    nodeSelector.replaceChildren(placeholder, ...options);
-    nodeSelector.value = selectedIndex === undefined ? '' : String(selectedIndex);
-    el('homeResults').textContent = matches > limit
-      ? 'Первые ' + limit + ' из ' + matches + '. Уточни поиск.'
-      : '';
+    nodeSelector.replaceChildren(placeholder, ...options.map(node => {
+      const index = nodeIndexes.get(node);
+      const option = put('option', description(node));
+      option.value = String(index);
+      return option;
+    }));
+    nodeSelector.value = active ? String(nodeIndexes.get(active)) : '';
+    const count = Math.ceil(matching.length / pageSize);
+    el('homePrev').disabled = page === 0;
+    el('homeNext').disabled = page + 1 >= count;
+    el('homePageLabel').textContent = count ? (page + 1) + ' / ' + count : '';
+    el('homeResults').textContent = matching.length ? 'Найдено элементов: ' + matching.length : '';
+
   }
 
   function flushStatus(text) {
@@ -92,13 +101,14 @@
     const index = nodeIndexes.get(node);
     if (!edits[index]) edits[index] = {};
     edits[index][property] = value;
+    dirty = true;
     flushStatus('Есть несохранённые изменения');
   }
 
   function setAttribute(node, name, value) {
     if (['href', 'src', 'poster'].includes(name) && value) {
       try {
-        const url = new URL(value, frameDocument.baseURI);
+        const url = new URL(value, sourceDocument.baseURI);
         const allowed = name === 'href' ? ['https:', 'mailto:', 'tel:'] : ['https:'];
         if (!allowed.includes(url.protocol)) return false;
       } catch {
@@ -124,15 +134,11 @@
     container.append(wrapper);
   }
 
-  function selectNode(node, scroll = false) {
+  function selectNode(node) {
     active = node;
-    if (marker) marker.removeAttribute('data-uu-editor-selected');
-    marker = frameDocument.body.contains(node) ? node : null;
-    if (marker) marker.setAttribute('data-uu-editor-selected', '');
-    if (scroll && marker) marker.scrollIntoView({block: 'nearest'});
     rebuildList();
     const inspector = el('homeFields');
-    inspector.replaceChildren(put('h3', description(node, nodeIndexes.get(node))));
+    inspector.replaceChildren(put('h3', description(node)));
     const texts = editableText(node);
     texts.forEach((text, index) => field(inspector, 'Текст ' + (index + 1), text.textContent, value => {
       text.textContent = value || '\u00a0';
@@ -152,29 +158,15 @@
     }
     const parent = node.parentElement;
     if (nodeIndexes.has(parent)) {
-      inspector.prepend(button('Родительский элемент', 'btn', () => selectNode(parent, true)));
+      inspector.prepend(button('Родительский элемент', 'btn', () => selectNode(parent)));
     }
   }
 
-  function initializeFrame(request) {
-    if (request !== selectionRequest || !loading) return;
-    const {previous, deadline} = pendingFrame;
-    const document = frame.contentDocument;
-    if (!document?.body || document === previous || document.readyState === 'loading') {
-      if (performance.now() < deadline) requestAnimationFrame(() => initializeFrame(request));
-      else {
-        loading = false;
-        flushStatus('Предпросмотр недоступен в этом браузере.');
-      }
-      return;
-    }
-    frameDocument = document;
+  function initializePage(snapshot) {
+    sourceDocument = new DOMParser().parseFromString(snapshot, 'text/html');
     loading = false;
     textNodes = new WeakMap();
-    editorStyle = frameDocument.createElement('style');
-    editorStyle.textContent = '[data-uu-editor-selected]{outline:3px solid #5143df!important;outline-offset:-3px!important}';
-    frameDocument.head.append(editorStyle);
-    nodes = Array.from(frameDocument.querySelectorAll('title, meta[name], body, body *')).filter(node => node.localName !== 'style');
+    nodes = Array.from(sourceDocument.querySelectorAll('title, meta[name], body, body *')).filter(node => node.localName !== 'style');
     nodeIndexes = new WeakMap(nodes.map((node, index) => [node, index]));
     el('homeExport').disabled = false;
     for (const [index, patch] of Object.entries(edits)) {
@@ -188,15 +180,10 @@
         } else if (editable.includes(property)) setAttribute(node, property, value);
       }
     }
-    frameDocument.addEventListener('click', event => {
-      event.preventDefault();
-      event.stopPropagation();
-      const node = event.target.closest?.('body, body *');
-      if (nodeIndexes.has(node)) selectNode(node);
-    }, true);
-    frameDocument.addEventListener('submit', event => event.preventDefault(), true);
+    el('homePreview').disabled = false;
+    el('homeSave').disabled = false;
     rebuildList();
-    flushStatus('Снимок загружен · ' + nodes.length + ' элементов');
+    flushStatus(dirty ? 'Есть несохранённые изменения' : 'Доступно элементов: ' + nodes.length);
   }
 
   el('homeSite').replaceChildren(...sites.map(site => {
@@ -206,23 +193,21 @@
   }));
 
   async function loadSite(id) {
-    if (currentSite && el('homeStatus').textContent === 'Есть несохранённые изменения'
-      && !window.confirm('Переключить сайт без сохранения изменений?')) {
-      el('homeSite').value = currentSite;
-      return;
-    }
+    if (currentSite && !loading) sessionDrafts.set(currentSite, {edits, dirty});
     const request = ++selectionRequest;
     currentSite = id;
     const site = bySite(id);
     el('homeSite').value = id;
     el('homeSource').href = 'https://' + site.domain + '/';
     active = null;
-    marker = null;
     nodes = [];
     el('homeFields').replaceChildren();
     el('homeFind').value = '';
-    rebuildList();
+    page = 0;
     loading = true;
+    rebuildList();
+    el('homePreview').disabled = true;
+    el('homeSave').disabled = true;
     el('homeExport').disabled = true;
     flushStatus('Открываю страницу…');
     let snapshot;
@@ -241,9 +226,10 @@
       const saved = JSON.parse(localStorage.getItem(storagePrefix + id));
       edits = saved?.fingerprint === snapshotFingerprint ? saved.edits : {};
     } catch { edits = {}; }
-    pendingFrame = {previous: frame.contentDocument, deadline: performance.now() + 15000};
-    frame.srcdoc = snapshot;
-    requestAnimationFrame(() => initializeFrame(request));
+    const draft = sessionDrafts.get(id);
+    if (draft) edits = draft.edits;
+    dirty = Boolean(draft?.dirty);
+    initializePage(snapshot);
   }
 
   el('openHome').onclick = () => {
@@ -252,9 +238,11 @@
   };
   el('homeSite').onchange = () => loadSite(el('homeSite').value);
   el('homeClose').onclick = () => dialog.close();
-  el('homeFind').oninput = rebuildList;
+  el('homeFind').oninput = () => { page = 0; rebuildList(); };
+  el('homePrev').onclick = () => { page--; rebuildList(); };
+  el('homeNext').onclick = () => { page++; rebuildList(); };
   nodeSelector.onchange = () => {
-    if (nodeSelector.value !== '') selectNode(nodes[Number(nodeSelector.value)], true);
+    if (nodeSelector.value !== '') selectNode(nodes[Number(nodeSelector.value)]);
   };
   el('homeMobile').onclick = () => {
     const mobile = frame.classList.toggle('mobile');
@@ -269,30 +257,47 @@
     return hash >>> 0;
   }
 
+  function serializePage() {
+    return '<!doctype html>\n' + sourceDocument.documentElement.outerHTML;
+  }
+
+  const preview = el('homePreviewDialog');
+  el('homePreview').onclick = () => {
+    preview.showModal();
+    frame.srcdoc = serializePage();
+  };
+  el('homePreviewClose').onclick = () => preview.close();
+  preview.addEventListener('close', () => frame.removeAttribute('srcdoc'));
+
   const codeDialog = el('homeCodeDialog');
   const code = el('homeCode');
+  let exportedHtml = '';
   el('homeExport').onclick = () => {
-    if (loading || !frameDocument) return;
-    const clone = frameDocument.documentElement.cloneNode(true);
-    clone.querySelector('[data-uu-editor-selected]')?.removeAttribute('data-uu-editor-selected');
-    const styleIndex = Array.from(frameDocument.head.children).indexOf(editorStyle);
-    clone.querySelector('head').children[styleIndex]?.remove();
-    code.value = '<!doctype html>\n' + clone.outerHTML;
-    el('homeCodeStatus').textContent = '';
+    exportedHtml = serializePage();
+    code.value = '';
+    code.hidden = true;
+    el('homeShowCode').hidden = false;
+    el('homeCodeStatus').textContent = 'HTML готов к скачиванию.';
     codeDialog.showModal();
+  };
+  el('homeShowCode').onclick = () => {
+    code.value = exportedHtml;
+    code.hidden = false;
+    el('homeShowCode').hidden = true;
   };
   el('homeCodeClose').onclick = () => codeDialog.close();
   el('homeCopy').onclick = async () => {
     try {
-      await navigator.clipboard.writeText(code.value);
+      await navigator.clipboard.writeText(exportedHtml);
       el('homeCodeStatus').textContent = 'Код скопирован.';
     } catch {
+      el('homeShowCode').click();
       code.select();
       el('homeCodeStatus').textContent = 'Код выделен. Скопируй его через меню браузера.';
     }
   };
   el('homeDownload').onclick = () => {
-    const url = URL.createObjectURL(new Blob([code.value], {type: 'text/html;charset=utf-8'}));
+    const url = URL.createObjectURL(new Blob([exportedHtml], {type: 'text/html;charset=utf-8'}));
     const link = put('a');
     link.href = url;
     link.download = bySite(currentSite).domain + '.html';
@@ -304,6 +309,8 @@
     if (loading || !nodes.length) return;
     try {
       localStorage.setItem(storagePrefix + currentSite, JSON.stringify({fingerprint: snapshotFingerprint, edits}));
+      dirty = false;
+      sessionDrafts.delete(currentSite);
       flushStatus('Изменения сохранены в этом браузере.');
     } catch {
       flushStatus('Браузер не смог сохранить изменения.');

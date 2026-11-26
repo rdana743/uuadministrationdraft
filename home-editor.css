@@ -1,4 +1,4 @@
-#homeEditor{width:calc(100% - 22px);max-width:none;height:calc(100dvh - 22px);max-height:none;margin:auto}
+#homeEditor,#homePreviewDialog{width:calc(100% - 22px);max-width:none;height:calc(100dvh - 22px);max-height:none;margin:auto}
 .home-shell{display:grid;grid-template-rows:auto minmax(0,1fr);height:100%}
 .home-head{padding:12px 18px;background:#fff;border-bottom:1px solid #e5e7ef;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .home-head h2{margin:0;font-size:18px}.home-head a{color:#4739bf;font-size:14px}
@@ -15,3 +15,10 @@
 
 .home-code{padding:16px}.home-code textarea{width:100%;height:55dvh;resize:vertical;white-space:pre;font:13px/1.45 ui-monospace,monospace}
 #homeExport:disabled{opacity:.5;cursor:default}
+
+.home-outline{width:100%;overflow:auto;background:white;padding:18px;border:1px solid #e5e7ef;border-radius:12px}
+.home-outline h3{margin:0 0 12px}
+#homeList{display:grid;gap:6px}
+.home-item{text-align:left;overflow-wrap:anywhere}.home-item[aria-pressed=true]{border-color:#5143df;background:#f1efff}
+.home-pagination{margin-top:12px;font-size:14px}
+.home-code textarea{margin-top:12px}
