@@ -66,14 +66,14 @@ def clean(site, html):
             if urlsplit(background).scheme == "https":
                 tag["style"] = (tag.get("style", "") + ";background-image:url(" + json.dumps(background) + ")")
         for attr in list(tag.attrs):
-            if attr not in ATTRIBUTES and not attr.startswith(("aria-", "data-field-", "data-artboard-")):
+            if attr not in ATTRIBUTES and not attr.startswith(("aria-", "data-field-", "data-artboard-", "data-elem-", "data-record-", "data-screen-")):
                 del tag[attr]
         for attr in ("href", "src", "poster", "xlink:href"):
             if attr in tag.attrs:
                 value = safe_url(tag[attr], base)
                 host = urlsplit(value).hostname or ""
                 if attr in {"src", "poster"} and host and not (
-                    host == site or host.endswith("." + site) or ASSET_HOSTS.search(host)
+                    host == site or host.endswith("." + site) or host == "backupuusites.hb.bizmrg.com" or ASSET_HOSTS.search(host)
                     or host.removeprefix("www.") in SITES.values()
                 ):
                     value = ""

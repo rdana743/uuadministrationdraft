@@ -49,3 +49,4 @@
 #homeEditor.uu-preview-wide .home-inspector{display:none}
 #homeEditor.uu-preview-wide .uu-stage:not(.mobile){max-width:none}
 #homeEditor.uu-preview-wide .home-canvas{padding:0}
+#homeOriginalFrame.uu-original-loading{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}

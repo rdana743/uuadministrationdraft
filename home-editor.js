@@ -4,19 +4,35 @@
   const visual = el('homeVisual');
   const originalFrame = el('homeOriginalFrame');
   let originalDocument;
-  let activeBritankaAssets;
+  let activeOriginalAssets;
   let originalNodes = new Map();
   let originalTexts = new Map();
 
-  function britankaAssets() {
-    if (window.uuBritanka) return Promise.resolve(window.uuBritanka);
-    const embedded = el('uu-britanka-assets');
-    if (embedded) return Promise.resolve(JSON.parse(embedded.textContent));
-    return new Promise((resolve, reject) => {
+  const styleCache = new Map();
+  window.receiveUuStyles = (id, assets) => styleCache.set(id, assets);
+
+  async function decodeAsset(embedded) {
+    const bytes = Uint8Array.from(atob(embedded.textContent), character => character.charCodeAt(0));
+    const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
+    return new Response(stream).text();
+  }
+
+  async function originalAssets(id) {
+    if (styleCache.has(id)) return styleCache.get(id);
+    const embedded = el('uu-styles-' + id);
+    if (embedded) {
+      const assets = JSON.parse(await decodeAsset(embedded));
+      styleCache.set(id, assets);
+      return assets;
+    }
+    return new Promise(resolve => {
       const script = put('script');
-      script.src = 'styles/bhsad.js';
-      script.onload = () => resolve(window.uuBritanka);
-      script.onerror = reject;
+      script.src = 'styles/' + id + '.js?v=original3';
+      script.onload = () => {
+        script.remove();
+        resolve(id === 'bhsad' ? window.uuBritanka : styleCache.get(id));
+      };
+      script.onerror = () => { script.remove(); resolve(); };
       document.head.append(script);
     });
   }
@@ -30,7 +46,7 @@
         editor.setAttribute('aria-label', 'Текст на странице');
         editor.onfocus = () => selectNode(nodes[index], false);
         editor.oninput = () => {
-          const value = editor.innerText;
+          const value = editor.textContent;
           const source = editableText(nodes[index])[offset];
           source.textContent = value || '\u00a0';
           setChange(nodes[index], 'text:' + offset, value);
@@ -42,39 +58,66 @@
     originalDocument?.documentElement.classList.toggle('uu-editing', !previewMode);
   }
 
-  function applyBritankaStyles(clone, assets) {
-    clone.querySelector('header.header')?.classList.add('headroom');
-    const head = clone.querySelector('head');
-    for (const link of head.querySelectorAll('link[rel=stylesheet]')) link.remove();
+  function originalStyle(css) {
     const sheet = put('style');
-    sheet.textContent = assets.css;
-    head.append(sheet);
-    const overrides = put('style');
-    overrides.textContent = `
-      .announce-big__bg,.announce-big__container{opacity:1!important}
-      .announce-big__preloader{display:none!important}
-      html.uu-editing [contenteditable=true],html.uu-editing [contenteditable=plaintext-only]{cursor:text}
+    sheet.textContent = css.replace(/<\/style/gi, match => match.replace('<', '\\3c '));
+    return sheet;
+  }
+
+  function applyOriginalStyles(clone, id, assets = {}) {
+    const head = clone.querySelector('head');
+    const links = head.querySelectorAll('link[rel=stylesheet]');
+    for (const link of links) {
+      const cached = assets.styles?.[link.getAttribute('href')];
+      if (cached) link.replaceWith(originalStyle(cached));
+      else if (assets.css) link.remove();
+    }
+    if (assets.css) head.append(originalStyle(assets.css));
+    head.append(originalStyle(`
+      html.uu-editing [contenteditable=plaintext-only]{cursor:text}
       html.uu-editing [contenteditable=plaintext-only]:focus{outline:2px solid #7165ff;outline-offset:2px}
-    `;
-    head.append(overrides);
-    for (const [kind, url] of Object.entries(assets.images)) {
-      const image = clone.querySelector('.announce-slider__slide.is-active .announce-slider__image-' + kind + ' img');
-      if (image && !image.getAttribute('src')) image.setAttribute('src', url);
+      .t-animate,.t-animate_started,.t-animate_wait,.t396__elem .tn-atom[data-animate-sbs-event]{opacity:1!important;visibility:visible!important}
+      #allrecords{opacity:1!important;visibility:visible!important}
+    `));
+    const responsiveRules = new Set();
+    for (const record of clone.querySelectorAll('[class*="t-screen"]')) {
+      for (const name of record.classList) {
+        const match = /^t-screen(min|max)-(\d+)px$/.exec(name);
+        if (!match) continue;
+        const [, bound, width] = match;
+        const limit = bound === 'min' ? Number(width) - 0.02 : Number(width);
+        responsiveRules.add('@media (' + (bound === 'min' ? 'max' : 'min') + '-width:' + limit + 'px){.' + name + '{display:none!important}}');
+      }
+    }
+    if (responsiveRules.size) head.append(originalStyle([...responsiveRules].join('')));
+    if (id === 'scream' && clone.querySelector('#rec2048276891')) {
+      head.append(originalStyle('#rec2048276991{display:none!important}'));
+    }
+    if (id === 'bhsad') {
+      clone.querySelector('header.header')?.classList.add('headroom');
+      head.append(originalStyle('.announce-big__bg,.announce-big__container{opacity:1!important}.announce-big__preloader{display:none!important}'));
+      for (const [kind, url] of Object.entries(assets.images || {})) {
+        const image = clone.querySelector('.announce-slider__slide.is-active .announce-slider__image-' + kind + ' img');
+        if (image && !image.getAttribute('src')) image.setAttribute('src', url);
+      }
     }
     for (const image of clone.querySelectorAll('img[src]')) {
       if (!image.closest('.announce-slider__slide.is-active')) image.loading = 'lazy';
     }
   }
 
-  async function renderBritanka(request) {
-    const assets = await britankaAssets();
+  async function renderOriginal(id, request) {
+    const assets = await originalAssets(id) || {};
     if (request !== selectionRequest) return;
-    activeBritankaAssets = assets;
+    activeOriginalAssets = assets;
     const clone = sourceDocument.documentElement.cloneNode(true);
-    applyBritankaStyles(clone, assets);
+    applyOriginalStyles(clone, id, assets);
+    clone.setAttribute('data-uu-preview', String(request));
+    const body = clone.querySelector('body');
     const marked = Array.from(clone.querySelectorAll('title, meta[name], body, body *')).filter(node => node.localName !== 'style');
     for (const [index, node] of marked.entries()) {
       node.setAttribute('data-uu-index', String(index));
+      if (!body.contains(node) || node.namespaceURI !== 'http://www.w3.org/1999/xhtml') continue;
       const texts = editableText(nodes[index]);
       if (!texts.length || !/^(h[1-6]|p|a|button|div|span|li|strong|b|em|label)$/.test(node.localName)) continue;
       const children = Array.from(node.childNodes);
@@ -88,15 +131,14 @@
     }
     const previous = originalFrame.contentDocument;
     originalFrame.srcdoc = '<!doctype html>' + clone.outerHTML;
+    originalFrame.classList.add('uu-original-loading');
     originalFrame.hidden = false;
-    visual.hidden = true;
-    el('homeMore').hidden = true;
     await new Promise((resolve, reject) => {
       const deadline = performance.now() + 10000;
       function ready() {
         if (request !== selectionRequest) return resolve();
         const doc = originalFrame.contentDocument;
-        if (doc && doc !== previous && doc.querySelector('.announce-big__header') && doc.readyState !== 'loading') return resolve();
+        if (doc && doc !== previous && doc.documentElement?.getAttribute('data-uu-preview') === String(request) && doc.readyState !== 'loading') return resolve();
         if (performance.now() > deadline) return reject(new Error('Предпросмотр не открылся'));
         requestAnimationFrame(ready);
       }
@@ -104,6 +146,9 @@
     });
     if (request !== selectionRequest) return;
     originalDocument = originalFrame.contentDocument;
+    originalFrame.classList.remove('uu-original-loading');
+    visual.hidden = true;
+    el('homeMore').hidden = true;
     for (const node of originalDocument.querySelectorAll('[data-uu-index]')) {
       const index = Number(node.dataset.uuIndex);
       originalNodes.set(index, node);
@@ -113,6 +158,8 @@
       }
       if (texts.length) originalTexts.set(index, texts);
     }
+    originalDocument.addEventListener('submit', event => event.preventDefault());
+    originalDocument.addEventListener('auxclick', event => event.preventDefault());
     originalDocument.addEventListener('click', event => {
       event.preventDefault();
       if (previewMode) return;
@@ -143,21 +190,23 @@
   let shownBlocks = 0;
   let textControls = new Map();
   let imageControls = new Map();
-  window.receiveUuHomepage = (id, html) => snapshots.set(id, html);
+  const previousFingerprints = new Map();
+  window.receiveUuHomepage = (id, html, previousFingerprint) => {
+    snapshots.set(id, html);
+    if (previousFingerprint !== undefined) previousFingerprints.set(id, previousFingerprint);
+  };
 
   async function readSnapshot(id) {
     if (snapshots.has(id)) return Promise.resolve(snapshots.get(id));
     const embedded = el('uu-snapshot-' + id);
     if (embedded) {
-      const bytes = Uint8Array.from(atob(embedded.textContent), character => character.charCodeAt(0));
-      const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
-      const html = await new Response(stream).text();
-      snapshots.set(id, html);
-      return Promise.resolve(html);
+      const html = await decodeAsset(embedded);
+      window.receiveUuHomepage(id, html, embedded.dataset.previous ? Number(embedded.dataset.previous) : undefined);
+      return html;
     }
     return new Promise((resolve, reject) => {
       const script = put('script');
-      script.src = 'homepages/' + id + '.js';
+      script.src = 'homepages/' + id + '.js?v=original3';
       script.onload = () => {
         script.remove();
         const html = snapshots.get(id);
@@ -429,9 +478,9 @@
     }
     blocks = buildBlocks();
     renderCanvas();
-    if (currentSite === 'bhsad') {
+    {
       const request = selectionRequest;
-      renderBritanka(request).catch(() => {
+      renderOriginal(currentSite, request).catch(() => {
         if (request !== selectionRequest) return;
         originalFrame.hidden = true;
         visual.hidden = false;
@@ -456,10 +505,11 @@
     if (currentSite && !loading) sessionDrafts.set(currentSite, {edits, dirty});
     const request = ++selectionRequest;
     originalDocument = undefined;
-    activeBritankaAssets = undefined;
+    activeOriginalAssets = undefined;
     originalNodes = new Map();
     originalTexts = new Map();
     originalFrame.hidden = true;
+    originalFrame.classList.remove('uu-original-loading');
     originalFrame.removeAttribute('srcdoc');
     visual.hidden = false;
     currentSite = id;
@@ -495,7 +545,7 @@
     snapshotFingerprint = fingerprint(snapshot);
     try {
       const saved = JSON.parse(localStorage.getItem(storagePrefix + id));
-      edits = saved?.fingerprint === snapshotFingerprint ? saved.edits : {};
+      edits = saved && (saved.fingerprint === snapshotFingerprint || saved.fingerprint === previousFingerprints.get(id)) ? saved.edits : {};
     } catch { edits = {}; }
     const draft = sessionDrafts.get(id);
     if (draft) edits = draft.edits;
@@ -530,7 +580,7 @@
 
   function serializePage() {
     const page = sourceDocument.documentElement.cloneNode(true);
-    if (activeBritankaAssets) applyBritankaStyles(page, activeBritankaAssets);
+    if (activeOriginalAssets) applyOriginalStyles(page, currentSite, activeOriginalAssets);
     return '<!doctype html>\n' + page.outerHTML;
   }
 
