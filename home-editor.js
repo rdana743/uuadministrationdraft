@@ -1,6 +1,7 @@
 (() => {
   const dialog = el('homeEditor');
-  const frame = el('homeFrame');
+  const stage = el('homeStage');
+  const visual = el('homeVisual');
   const nodeSelector = el('homeNodes');
   const storagePrefix = 'uu-home-edits-2:';
   const editable = ['href', 'src', 'alt', 'title', 'placeholder', 'name', 'value', 'type', 'poster', 'content', 'aria-label', 'class', 'style'];
@@ -17,6 +18,11 @@
   const snapshots = new Map();
   const sessionDrafts = new Map();
   let dirty = false;
+  let previewMode = false;
+  let blocks = [];
+  let shownBlocks = 0;
+  let textControls = new Map();
+  let imageControls = new Map();
   window.receiveUuHomepage = (id, html) => snapshots.set(id, html);
 
   async function readSnapshot(id) {
@@ -132,18 +138,119 @@
     });
     wrapper.append(input);
     container.append(wrapper);
+    return input;
   }
 
-  function selectNode(node) {
+  function buildBlocks() {
+    const groups = [];
+    let current;
+    let previousContainer;
+    const main = sourceDocument.querySelector('main, [role=main]');
+    const heading = sourceDocument.querySelector('h1');
+    const start = !main && heading ? nodeIndexes.get(heading) : 0;
+    for (const node of nodes.slice(start || 0)) {
+      if (!(main || sourceDocument.body).contains(node) || node.closest('header,nav,footer,form,[hidden],.t-popup,.t-form')) continue;
+      const tag = node.localName;
+      const texts = editableText(node);
+      const image = tag === 'img' && node.getAttribute('src');
+      if (!image && (!texts.length || !/^(h[1-6]|p|a|button|div|span|li|strong|b|em|td|label)$/.test(tag))) continue;
+      if (tag === 'div' || tag === 'span') {
+        if (texts.every(text => text.textContent.trim().length < 3)) continue;
+      }
+      const container = node.closest('.t-rec, main > section, main > article, body > section');
+      if (!current || (container && container !== previousContainer) || current.length >= 18 || (!container && /^h[1-3]$/.test(tag))) {
+        current = [];
+        groups.push(current);
+      }
+      previousContainer = container;
+      current.push(node);
+    }
+    return groups.length ? groups : [nodes.filter(node => node.localName === 'title')];
+  }
+
+  function updateCanvasText(text, value, origin) {
+    const control = textControls.get(text);
+    if (control && control !== origin) control.textContent = value;
+  }
+
+  function renderBlock(group, index) {
+    const block = put('section', '', 'uu-block' + (index === 0 ? ' uu-cover' : ''));
+    const content = put('div', '', 'uu-block-content');
+    for (const node of group) {
+      const tag = node.localName;
+      if (tag === 'img') {
+        const label = node.getAttribute('alt') || 'Изображение';
+        const card = previewMode ? put('div', '', 'uu-image') : button('', 'uu-image', () => selectNode(node, false));
+        const image = put('img');
+        image.loading = 'lazy';
+        image.decoding = 'async';
+        image.alt = label;
+        try {
+          const url = new URL(node.getAttribute('src'), sourceDocument.baseURI);
+          if (url.protocol === 'https:') image.src = url.href;
+        } catch {}
+        const fallback = put('span', label);
+        fallback.hidden = true;
+        image.onerror = () => { image.hidden = true; fallback.hidden = false; };
+        image.onload = () => { image.hidden = false; fallback.hidden = true; };
+        imageControls.set(node, {image, fallback});
+        card.append(fallback);
+        card.append(image);
+        content.append(card);
+        continue;
+      }
+      const heading = /^h[1-6]$/.test(tag) || (index === 0 && !content.childElementCount);
+      const element = put(heading ? (index === 0 ? 'h2' : 'h3') : 'div', '', (tag === 'a' || tag === 'button') ? 'uu-cta' : 'uu-copy');
+      editableText(node).forEach((text, textIndex) => {
+        const piece = put('span', text.textContent);
+        if (!previewMode) {
+          textControls.set(text, piece);
+          piece.contentEditable = 'plaintext-only';
+          piece.spellcheck = false;
+          piece.setAttribute('role', 'textbox');
+          piece.setAttribute('aria-label', 'Текст на холсте');
+          piece.addEventListener('focus', () => selectNode(node, false));
+          piece.addEventListener('input', () => {
+            const value = piece.innerText;
+            text.textContent = value || '\u00a0';
+            setChange(node, 'text:' + textIndex, value);
+            const input = el('homeFields').querySelectorAll('[data-uu-text]')[textIndex];
+            if (active === node && input) input.value = value;
+          });
+        }
+        element.append(piece);
+      });
+      content.append(element);
+    }
+    block.append(content);
+    return block;
+  }
+
+  function appendBlocks() {
+    const end = Math.min(blocks.length, shownBlocks + 6);
+    for (; shownBlocks < end; shownBlocks++) visual.append(renderBlock(blocks[shownBlocks], shownBlocks));
+    el('homeMore').hidden = shownBlocks >= blocks.length;
+  }
+
+  function renderCanvas() {
+    textControls = new Map();
+    imageControls = new Map();
+    shownBlocks = 0;
+    visual.replaceChildren();
+    appendBlocks();
+  }
+
+  function selectNode(node, updateList = true) {
     active = node;
-    rebuildList();
+    if (updateList) rebuildList();
     const inspector = el('homeFields');
     inspector.replaceChildren(put('h3', description(node)));
     const texts = editableText(node);
     texts.forEach((text, index) => field(inspector, 'Текст ' + (index + 1), text.textContent, value => {
       text.textContent = value || '\u00a0';
       setChange(node, 'text:' + index, value);
-    }, true));
+      updateCanvasText(text, value);
+    }, true).dataset.uuText = String(index));
     const relevant = {
       a: ['href'], img: ['src', 'alt'], video: ['src', 'poster'], source: ['src'],
       input: ['placeholder', 'name', 'value', 'type'], textarea: ['placeholder', 'name'],
@@ -151,10 +258,25 @@
     };
     const attrs = new Set([...editable.filter(name => node.hasAttribute(name)), ...(relevant[node.localName] || []), 'class', 'style', 'aria-label']);
     for (const name of attrs) {
-      field(inspector, name, node.getAttribute(name) || '', value => {
+      const input = field(inspector, name, node.getAttribute(name) || '', value => {
         if (!setAttribute(node, name, value)) return false;
         setChange(node, name, value);
+
       }, name === 'style');
+      if (name === 'src' || name === 'alt') input.addEventListener('change', () => {
+        const control = imageControls.get(node);
+        if (!control) return;
+        const label = node.getAttribute('alt') || 'Изображение';
+        control.image.alt = label;
+        control.fallback.textContent = label;
+        const source = node.getAttribute('src');
+        if (source) control.image.src = new URL(source, sourceDocument.baseURI).href;
+        else {
+          control.image.removeAttribute('src');
+          control.image.hidden = true;
+          control.fallback.hidden = false;
+        }
+      });
     }
     const parent = node.parentElement;
     if (nodeIndexes.has(parent)) {
@@ -180,6 +302,9 @@
         } else if (editable.includes(property)) setAttribute(node, property, value);
       }
     }
+    blocks = buildBlocks();
+    renderCanvas();
+    el('homeMobile').disabled = false;
     el('homePreview').disabled = false;
     el('homeSave').disabled = false;
     rebuildList();
@@ -201,12 +326,16 @@
     el('homeSource').href = 'https://' + site.domain + '/';
     active = null;
     nodes = [];
+    blocks = [];
+    visual.replaceChildren(put('p', 'Открываю страницу…', 'uu-empty'));
+    el('homeMore').hidden = true;
     el('homeFields').replaceChildren();
     el('homeFind').value = '';
     page = 0;
     loading = true;
     rebuildList();
     el('homePreview').disabled = true;
+    el('homeMobile').disabled = true;
     el('homeSave').disabled = true;
     el('homeExport').disabled = true;
     flushStatus('Открываю страницу…');
@@ -216,7 +345,7 @@
       if (request !== selectionRequest) return;
       loading = false;
       currentSite = null;
-      frame.srcdoc = '';
+      visual.replaceChildren(put('p', 'Не удалось открыть страницу.', 'uu-empty'));
       flushStatus('Не удалось загрузить страницу. Открой редактор ещё раз.');
       return;
     }
@@ -245,7 +374,7 @@
     if (nodeSelector.value !== '') selectNode(nodes[Number(nodeSelector.value)]);
   };
   el('homeMobile').onclick = () => {
-    const mobile = frame.classList.toggle('mobile');
+    const mobile = stage.classList.toggle('mobile');
     el('homeMobile').textContent = mobile ? 'Компьютер' : 'Телефон';
     el('homeMobile').setAttribute('aria-pressed', String(mobile));
   };
@@ -261,13 +390,16 @@
     return '<!doctype html>\n' + sourceDocument.documentElement.outerHTML;
   }
 
-  const preview = el('homePreviewDialog');
+  el('homeMore').onclick = appendBlocks;
   el('homePreview').onclick = () => {
-    preview.showModal();
-    frame.srcdoc = serializePage();
+    previewMode = !previewMode;
+    stage.classList.toggle('uu-readonly', previewMode);
+    el('homePreview').textContent = previewMode ? 'К редактированию' : 'Предпросмотр';
+    el('homePreview').setAttribute('aria-pressed', String(previewMode));
+    const count = shownBlocks;
+    renderCanvas();
+    while (shownBlocks < count) appendBlocks();
   };
-  el('homePreviewClose').onclick = () => preview.close();
-  preview.addEventListener('close', () => frame.removeAttribute('srcdoc'));
 
   const codeDialog = el('homeCodeDialog');
   const code = el('homeCode');
