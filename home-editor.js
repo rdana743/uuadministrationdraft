@@ -2,6 +2,126 @@
   const dialog = el('homeEditor');
   const stage = el('homeStage');
   const visual = el('homeVisual');
+  const originalFrame = el('homeOriginalFrame');
+  let originalDocument;
+  let activeBritankaAssets;
+  let originalNodes = new Map();
+  let originalTexts = new Map();
+
+  function britankaAssets() {
+    if (window.uuBritanka) return Promise.resolve(window.uuBritanka);
+    const embedded = el('uu-britanka-assets');
+    if (embedded) return Promise.resolve(JSON.parse(embedded.textContent));
+    return new Promise((resolve, reject) => {
+      const script = put('script');
+      script.src = 'styles/bhsad.js';
+      script.onload = () => resolve(window.uuBritanka);
+      script.onerror = reject;
+      document.head.append(script);
+    });
+  }
+
+  function setOriginalMode() {
+    for (const [index, texts] of originalTexts) {
+      for (const [offset, editor] of texts.entries()) {
+        if (!editor) continue;
+        editor.contentEditable = previewMode ? 'false' : 'plaintext-only';
+        editor.tabIndex = previewMode ? -1 : 0;
+        editor.setAttribute('aria-label', 'Текст на странице');
+        editor.onfocus = () => selectNode(nodes[index], false);
+        editor.oninput = () => {
+          const value = editor.innerText;
+          const source = editableText(nodes[index])[offset];
+          source.textContent = value || '\u00a0';
+          setChange(nodes[index], 'text:' + offset, value);
+          const input = el('homeFields').querySelectorAll('[data-uu-text]')[offset];
+          if (active === nodes[index] && input) input.value = value;
+        };
+      }
+    }
+    originalDocument?.documentElement.classList.toggle('uu-editing', !previewMode);
+  }
+
+  function applyBritankaStyles(clone, assets) {
+    clone.querySelector('header.header')?.classList.add('headroom');
+    const head = clone.querySelector('head');
+    for (const link of head.querySelectorAll('link[rel=stylesheet]')) link.remove();
+    const sheet = put('style');
+    sheet.textContent = assets.css;
+    head.append(sheet);
+    const overrides = put('style');
+    overrides.textContent = `
+      .announce-big__bg,.announce-big__container{opacity:1!important}
+      .announce-big__preloader{display:none!important}
+      html.uu-editing [contenteditable=true],html.uu-editing [contenteditable=plaintext-only]{cursor:text}
+      html.uu-editing [contenteditable=plaintext-only]:focus{outline:2px solid #7165ff;outline-offset:2px}
+    `;
+    head.append(overrides);
+    for (const [kind, url] of Object.entries(assets.images)) {
+      const image = clone.querySelector('.announce-slider__slide.is-active .announce-slider__image-' + kind + ' img');
+      if (image && !image.getAttribute('src')) image.setAttribute('src', url);
+    }
+    for (const image of clone.querySelectorAll('img[src]')) {
+      if (!image.closest('.announce-slider__slide.is-active')) image.loading = 'lazy';
+    }
+  }
+
+  async function renderBritanka(request) {
+    const assets = await britankaAssets();
+    if (request !== selectionRequest) return;
+    activeBritankaAssets = assets;
+    const clone = sourceDocument.documentElement.cloneNode(true);
+    applyBritankaStyles(clone, assets);
+    const marked = Array.from(clone.querySelectorAll('title, meta[name], body, body *')).filter(node => node.localName !== 'style');
+    for (const [index, node] of marked.entries()) {
+      node.setAttribute('data-uu-index', String(index));
+      const texts = editableText(nodes[index]);
+      if (!texts.length || !/^(h[1-6]|p|a|button|div|span|li|strong|b|em|label)$/.test(node.localName)) continue;
+      const children = Array.from(node.childNodes);
+      for (const [offset, text] of texts.entries()) {
+        const copy = children[Array.from(nodes[index].childNodes).indexOf(text)];
+        if (copy?.nodeType !== 3) continue;
+        const wrapper = put('span', copy.textContent);
+        wrapper.setAttribute('data-uu-text-offset', String(offset));
+        copy.replaceWith(wrapper);
+      }
+    }
+    const previous = originalFrame.contentDocument;
+    originalFrame.srcdoc = '<!doctype html>' + clone.outerHTML;
+    originalFrame.hidden = false;
+    visual.hidden = true;
+    el('homeMore').hidden = true;
+    await new Promise((resolve, reject) => {
+      const deadline = performance.now() + 10000;
+      function ready() {
+        if (request !== selectionRequest) return resolve();
+        const doc = originalFrame.contentDocument;
+        if (doc && doc !== previous && doc.querySelector('.announce-big__header') && doc.readyState !== 'loading') return resolve();
+        if (performance.now() > deadline) return reject(new Error('Предпросмотр не открылся'));
+        requestAnimationFrame(ready);
+      }
+      requestAnimationFrame(ready);
+    });
+    if (request !== selectionRequest) return;
+    originalDocument = originalFrame.contentDocument;
+    for (const node of originalDocument.querySelectorAll('[data-uu-index]')) {
+      const index = Number(node.dataset.uuIndex);
+      originalNodes.set(index, node);
+      const texts = [];
+      for (const child of node.children) {
+        if (child.hasAttribute('data-uu-text-offset')) texts[Number(child.dataset.uuTextOffset)] = child;
+      }
+      if (texts.length) originalTexts.set(index, texts);
+    }
+    originalDocument.addEventListener('click', event => {
+      event.preventDefault();
+      if (previewMode) return;
+      const node = event.target.closest('[data-uu-index]');
+      if (node) selectNode(nodes[Number(node.dataset.uuIndex)], false);
+    });
+    setOriginalMode();
+  }
+
   const nodeSelector = el('homeNodes');
   const storagePrefix = 'uu-home-edits-2:';
   const editable = ['href', 'src', 'alt', 'title', 'placeholder', 'name', 'value', 'type', 'poster', 'content', 'aria-label', 'class', 'style'];
@@ -169,6 +289,9 @@
   }
 
   function updateCanvasText(text, value, origin) {
+    const index = nodeIndexes.get(active);
+    const original = originalTexts.get(index)?.[editableText(active).indexOf(text)];
+    if (original) original.textContent = value || '\u00a0';
     const control = textControls.get(text);
     if (control && control !== origin) control.textContent = value;
   }
@@ -261,6 +384,8 @@
       const input = field(inspector, name, node.getAttribute(name) || '', value => {
         if (!setAttribute(node, name, value)) return false;
         setChange(node, name, value);
+        const original = originalNodes.get(nodeIndexes.get(node));
+        if (original) setAttribute(original, name, value);
 
       }, name === 'style');
       if (name === 'src' || name === 'alt') input.addEventListener('change', () => {
@@ -304,6 +429,16 @@
     }
     blocks = buildBlocks();
     renderCanvas();
+    if (currentSite === 'bhsad') {
+      const request = selectionRequest;
+      renderBritanka(request).catch(() => {
+        if (request !== selectionRequest) return;
+        originalFrame.hidden = true;
+        visual.hidden = false;
+        renderCanvas();
+        flushStatus('Оригинальная вёрстка недоступна. Открыт блочный холст.');
+      });
+    }
     el('homeMobile').disabled = false;
     el('homePreview').disabled = false;
     el('homeSave').disabled = false;
@@ -320,6 +455,13 @@
   async function loadSite(id) {
     if (currentSite && !loading) sessionDrafts.set(currentSite, {edits, dirty});
     const request = ++selectionRequest;
+    originalDocument = undefined;
+    activeBritankaAssets = undefined;
+    originalNodes = new Map();
+    originalTexts = new Map();
+    originalFrame.hidden = true;
+    originalFrame.removeAttribute('srcdoc');
+    visual.hidden = false;
     currentSite = id;
     const site = bySite(id);
     el('homeSite').value = id;
@@ -387,15 +529,19 @@
   }
 
   function serializePage() {
-    return '<!doctype html>\n' + sourceDocument.documentElement.outerHTML;
+    const page = sourceDocument.documentElement.cloneNode(true);
+    if (activeBritankaAssets) applyBritankaStyles(page, activeBritankaAssets);
+    return '<!doctype html>\n' + page.outerHTML;
   }
 
   el('homeMore').onclick = appendBlocks;
   el('homePreview').onclick = () => {
     previewMode = !previewMode;
     stage.classList.toggle('uu-readonly', previewMode);
+    dialog.classList.toggle('uu-preview-wide', previewMode);
     el('homePreview').textContent = previewMode ? 'К редактированию' : 'Предпросмотр';
     el('homePreview').setAttribute('aria-pressed', String(previewMode));
+    if (originalDocument) return setOriginalMode();
     const count = shownBlocks;
     renderCanvas();
     while (shownBlocks < count) appendBlocks();

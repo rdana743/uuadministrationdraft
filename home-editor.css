@@ -43,3 +43,9 @@
 .uu-readonly .uu-block{border-color:transparent}
 #homeEditor .home-inspector details{font-size:14px;margin:12px 0}
 @media(max-width:720px){#homeEditor .home-body{grid-template-columns:1fr;grid-template-rows:minmax(180px,3fr) minmax(130px,2fr)}#homeEditor .home-canvas{padding:8px}}
+#homeOriginalFrame{display:block;width:100%;height:calc(100dvh - 125px);border:1px solid #dfe2ee;background:white;border-radius:10px}
+#homeOriginalFrame[hidden],#homeVisual[hidden]{display:none}
+#homeEditor.uu-preview-wide .home-body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}
+#homeEditor.uu-preview-wide .home-inspector{display:none}
+#homeEditor.uu-preview-wide .uu-stage:not(.mobile){max-width:none}
+#homeEditor.uu-preview-wide .home-canvas{padding:0}
