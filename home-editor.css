@@ -50,3 +50,26 @@
 #homeEditor.uu-preview-wide .uu-stage:not(.mobile){max-width:none}
 #homeEditor.uu-preview-wide .home-canvas{padding:0}
 #homeOriginalFrame.uu-original-loading{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+
+/* Workspace and navigation */
+:root{--ink:#14182a;--accent:#4633c9;--line:#dce0ea;--paper:#f5f6fa}
+body{background:var(--paper);color:var(--ink);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+.layout{grid-template-columns:228px minmax(0,1fr)}
+aside{background:#19192d}aside label{color:#c3c3d4}aside nav button.active{background:#dfd9ff;color:#282043;font-weight:650}
+.brand .mark{background:#dcff7b;border-radius:6px;letter-spacing:-2px}
+header{min-height:56px}main{max-width:1500px;padding:26px clamp(16px,2.6vw,42px)}
+.hero{padding:clamp(22px,3vw,40px);border-radius:18px;background:linear-gradient(110deg,#24203c,#393260);color:white}
+.hero h1{font-weight:650}.hero .muted{color:#ddd9ef}.hero .btn{background:transparent;color:white;border-color:#77718f}
+.hero .primary{background:#ddff84;border-color:#ddff84;color:#202232}
+.grid{gap:10px}.card{grid-template-columns:46px 1fr;grid-template-rows:auto auto;align-content:center;column-gap:13px;row-gap:5px;min-height:100px;border-radius:12px}
+.card .icon{grid-row:span 2;align-self:center;width:46px;height:46px;border-radius:10px}.card strong{line-height:1.24}.card small{grid-column:2}
+.card:focus-visible,.btn:focus-visible{outline-offset:2px}.btn{font-size:14px;min-height:38px;font-weight:580}.primary{background:var(--accent);border-color:var(--accent)}
+#homeEditor{width:100%;height:100dvh;max-height:100dvh;border-radius:0}
+.home-head{padding:10px 16px}.home-head h2{font-size:17px}.home-head .actions{gap:6px}
+.home-head select{max-width:min(36vw,280px);font-size:14px}
+.home-head button[aria-pressed=true]{background:#e9e4ff;color:#332387;border-color:#988ade}
+.home-inspector{padding:18px}.home-inspector h3{margin-top:0}.home-status{background:#f3f1ff;color:#483482;border-radius:8px;padding:9px 11px;line-height:1.4}
+.home-status:empty{display:none}.home-inspector details{border-block:1px solid var(--line);padding:12px 0}
+.home-inspector textarea:focus,.home-inspector input:focus{outline:2px solid #8679de}
+@media(max-width:800px){.layout{display:block}aside{padding:10px}aside .brand{padding:0 8px 8px}aside nav{display:flex;overflow-x:auto}aside nav button{width:auto;white-space:nowrap}.hero{align-items:flex-start}.home-head .actions{max-width:100%;overflow-x:auto;flex-wrap:nowrap}.home-head .actions>*{flex:none}.home-head{display:grid}.home-head>div:first-child{display:flex;align-items:center;gap:12px}}
+@media(max-width:520px){.grid{grid-template-columns:1fr}.card{min-height:76px}.hero .actions{gap:6px}.home-inspector{padding:10px}.table-wrap td,.table-wrap th{white-space:nowrap}}
