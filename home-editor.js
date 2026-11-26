@@ -66,10 +66,10 @@
 
   function applyOriginalStyles(clone, id, assets = {}) {
     const head = clone.querySelector('head');
-    const links = head.querySelectorAll('link[rel=stylesheet]');
+    const links = clone.querySelectorAll('link[rel~=stylesheet]');
     for (const link of links) {
       const cached = assets.styles?.[link.getAttribute('href')];
-      if (cached) link.replaceWith(originalStyle(cached));
+      if (cached !== undefined) link.replaceWith(originalStyle(cached));
       else if (assets.css) link.remove();
     }
     if (assets.css) head.append(originalStyle(assets.css));
@@ -107,11 +107,11 @@
   }
 
   async function renderOriginal(id, request) {
-    const assets = await originalAssets(id) || {};
+    const assets = await originalAssets(id);
+    if (!assets) throw new Error('Стили страницы недоступны');
     if (request !== selectionRequest) return;
     activeOriginalAssets = assets;
     const clone = sourceDocument.documentElement.cloneNode(true);
-    applyOriginalStyles(clone, id, assets);
     clone.setAttribute('data-uu-preview', String(request));
     const body = clone.querySelector('body');
     const marked = Array.from(clone.querySelectorAll('title, meta[name], body, body *')).filter(node => node.localName !== 'style');
@@ -129,6 +129,7 @@
         copy.replaceWith(wrapper);
       }
     }
+    applyOriginalStyles(clone, id, assets);
     const previous = originalFrame.contentDocument;
     originalFrame.srcdoc = '<!doctype html>' + clone.outerHTML;
     originalFrame.classList.add('uu-original-loading');
@@ -167,6 +168,7 @@
       if (node) selectNode(nodes[Number(node.dataset.uuIndex)], false);
     });
     setOriginalMode();
+    flushStatus(dirty ? 'Есть несохранённые изменения' : 'Доступно элементов: ' + nodes.length);
   }
 
   const nodeSelector = el('homeNodes');
@@ -492,7 +494,7 @@
     el('homePreview').disabled = false;
     el('homeSave').disabled = false;
     rebuildList();
-    flushStatus(dirty ? 'Есть несохранённые изменения' : 'Доступно элементов: ' + nodes.length);
+    flushStatus('Открываю оригинальную вёрстку…');
   }
 
   el('homeSite').replaceChildren(...sites.map(site => {
