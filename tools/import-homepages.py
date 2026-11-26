@@ -14,7 +14,7 @@ SITES = dict(
     scream="scream.school", soe="educationschool.ru", uteens="uteens.ru",
     college="mctechnicum.ru",
 )
-OUTPUT = pathlib.Path(__file__).resolve().parents[1] / "homepages.js"
+OUTPUT = pathlib.Path(__file__).resolve().parents[1] / "homepages"
 ASSET_HOSTS = re.compile(r"(?:^|\.)(?:tildacdn\.(?:com|net|ru|pub)|tilda\.ws|googleapis\.com|gstatic\.com)$")
 POLICY = (
     "default-src 'none'; style-src https: 'unsafe-inline'; img-src https: data:; "
@@ -101,10 +101,13 @@ def download(item):
 
 
 def write_snapshots(snapshots):
-    OUTPUT.write_text(
-        "window.UU_HOMEPAGES = " + json.dumps(dict(snapshots), ensure_ascii=False) + ";\n",
-        encoding="utf-8",
-    )
+    OUTPUT.mkdir(exist_ok=True)
+    for key, html in snapshots:
+        entry = json.dumps([key, html], ensure_ascii=False)
+        (OUTPUT / f"{key}.js").write_text(
+            "window.receiveUuHomepage(..." + entry + ");\n", encoding="utf-8"
+        )
+
 
 
 if __name__ == "__main__":

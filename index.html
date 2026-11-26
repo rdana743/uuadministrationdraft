@@ -5,10 +5,13 @@
 
 <dialog id="homeEditor" aria-labelledby="homeTitle"><div class="home-shell">
 <div class="home-head"><div><h2 id="homeTitle">Главные страницы</h2><a id="homeSource" target="_blank" rel="noopener noreferrer">Открыть оригинал</a></div>
-<div class="actions"><select id="homeSite" aria-label="Сайт"></select><button class="btn" id="homeMobile" aria-pressed="false">Телефон</button><button class="btn primary" id="homeSave">Сохранить черновик</button><button class="btn" id="homeClose">Закрыть</button></div></div>
+<div class="actions"><select id="homeSite" aria-label="Сайт"></select><button class="btn" id="homeMobile" aria-pressed="false">Телефон</button><button class="btn" id="homeExport" disabled>Экспорт HTML</button><button class="btn primary" id="homeSave">Сохранить черновик</button><button class="btn" id="homeClose">Закрыть</button></div></div>
 <div class="home-body"><div class="home-canvas"><iframe id="homeFrame" title="Снимок главной страницы" sandbox="allow-same-origin" referrerpolicy="no-referrer"></iframe></div>
-<div class="home-inspector"><p class="home-hint">Кликни по элементу на странице или найди его по тексту, тегу или ID.</p><label class="home-field">Поиск элемента<input id="homeFind" type="search"></label><label class="home-field">Элемент<select id="homeNodes"></select></label><p id="homeStatus" class="home-status" role="status"></p><div id="homeFields"></div></div></div>
+<div class="home-inspector"><p class="home-hint">Кликни по элементу на странице или найди его по тексту, тегу или ID.</p><label class="home-field">Поиск элемента<input id="homeFind" type="search"></label><label class="home-field">Элемент<select id="homeNodes"></select></label><p id="homeResults" class="home-hint"></p><p id="homeStatus" class="home-status" role="status"></p><div id="homeFields"></div></div></div>
 </div></dialog>
+<dialog id="homeCodeDialog" aria-labelledby="homeCodeTitle"><div class="dialog-head"><h2 id="homeCodeTitle">Код страницы</h2><button class="btn" id="homeCodeClose">Закрыть</button></div>
+<div class="home-code"><textarea id="homeCode" aria-label="Полный HTML страницы" readonly spellcheck="false"></textarea></div>
+<div class="dialog-foot"><span id="homeCodeStatus" role="status"></span><div class="actions"><button class="btn" id="homeCopy">Скопировать код</button><button class="btn primary" id="homeDownload">Скачать HTML</button></div></div></dialog>
 <script>
 const sites=[
  ['uu','UU','Universal University','u.university'],['bhsad','BHS','Британская высшая школа дизайна','britishdesign.ru'],
@@ -110,4 +113,4 @@ el('device').onclick=()=>{const mobile=el('preview').classList.toggle('mobile');
 el('close').onclick=()=>el('dialog').close();el('create').onclick=()=>openEditor(null);
 el('search').oninput=renderRows;el('filter').onchange=renderRows;
 render();
-</script><script src="homepages.js"></script><script src="home-editor.js"></script></body></html>
+</script><script src="home-editor.js"></script></body></html>
