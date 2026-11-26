@@ -24,7 +24,9 @@ def build():
     html = (ROOT / "index.html").read_text(encoding="utf-8")
     css = (ROOT / "home-editor.css").read_text(encoding="utf-8")
     editor = (ROOT / "home-editor.js").read_text(encoding="utf-8")
-    html = html.replace('<link rel="stylesheet" href="home-editor.css?v=studio2">', "<style>" + css + "</style>")
+    html = html.replace('<link rel="stylesheet" href="home-editor.css?v=studio3">', "<style>" + css + "</style>")
+    workspace = (ROOT / "workspace.js").read_text(encoding="utf-8")
+    html = html.replace('<script src="workspace.js?v=studio3"></script>', "<script>" + workspace + "</script>")
     assets = []
     for path in sorted((ROOT / "homepages").glob("*.js")):
         key, snapshot, *previous = entry(path, "receiveUuHomepage")
@@ -37,7 +39,7 @@ def build():
             if style_key != key:
                 raise ValueError(f"Stylesheet package mismatch: {style_path}")
         assets.append(embed("uu-styles-" + key, json.dumps(style, ensure_ascii=False)))
-    target = '<script src="home-editor.js?v=studio2"></script>'
+    target = '<script src="home-editor.js?v=studio3"></script>'
     if target not in html or len(assets) != 20:
         raise ValueError("The editor entry point or a homepage package is missing.")
     return html.replace(target, "".join(assets) + "<script>" + editor + "</script>")
